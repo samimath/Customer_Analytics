@@ -1,0 +1,132 @@
+---
+title: "MKT 500T HW 1"
+author: "Sami Cheong"
+date: "`r format(Sys.time(), '%b %d %Y')`"
+output: pdf_document
+---
+
+### Projecting customer retention rates 
+We are given the following customer retention data,
+
+```{r loadData, echo=FALSE, fig.align='center', fig.height=3, fig.width=4, message=FALSE, warning=FALSE}
+library(dplyr)
+library(knitr)
+library(readxl)
+library(kableExtra)
+data<-read_excel('data/HW1 data.xlsx')
+data$Year<-as.factor(data$Year)
+names(data)<-c('Year','Regular','High_End')
+
+kable(data[1:5,])%>%kable_styling(full_width = FALSE)
+```
+
+and the goal is to predict the following retention rates in the following periods:
+
+``` {r,echo=FALSE,message=FALSE, warning=FALSE}
+kable(data[6:nrow(data),])%>%kable_styling(full_width = FALSE)
+```
+
+Visualizing the customer population in temrs of % of total inital number of customers:
+
+
+``` {r plotData,echo=FALSE, fig.align='center', fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+library(kableExtra)
+library(ggplot2)
+n<-1000
+ggplot(data)+geom_point(aes(x=Year,y=Regular/n,color='Regular'),alpha=0.8)+
+  geom_point(aes(x=Year,y=High_End/n,color='High End'),alpha=0.8)+
+  labs(x='time period', y='# of remaining customers',title='% of customers that remained for \n Regular and High End segments')+scale_colour_manual(values=c("purple","blue"))
+#plot_ly(data,x=~Year,y=~High_End)
+
+```
+###
+First, let's take a look at the churn rates and retention rates of each customer segment:
+
+```{r massageData,fig.align='center',message=FALSE,warning=FALSE}
+data[,'Churn_R']<- c(0, -diff(data$Regular))
+data[,'Churn_H']<- c(0, -diff(data$High_End))
+data[,'Ret_R']<- data$Regular/lag(data$Regular,1)
+data[,'Ret_H']<- data$High_End/lag(data$High_End,1)
+insamp.data<-data[1:5,]
+kable(insamp.data)
+```
+
+Assuming we only have 4 seasons of data, there are 326 survivors and 593 survivors in the *Regular* and *High End* segment respectively. Based on this training data, we are interested in knowing the period $t$ in which a customer churns $P(T=t)$, with the following assumption:
+
+- $\theta$ is the probability that a customer witll 'flip' and switch brands.
+
+- $P(T=t|\theta)$ is the probability that a customer 'flip' at time $t$ given $\theta$, which follows the geometric distribution with density $f(t|\theta) = \theta(1-\theta)^t$.
+
+- $\theta$ follows a density function $p(\theta)$ characterized by $\Gamma(\alpha,\beta)$.
+
+Now, since $P(T=t) = \int_{0}^{1} f(t|\theta) p(\theta) d\theta$, after some algebra we can deduce that $P(T=t)$ follows the shifted Beta Geometric Distribution, which is defined by the following: $P(T=t) =  \frac{\alpha}{\alpha+\beta}$ for t = 1 and 
+$\frac{\beta + t -1}{\alpha + \beta + t -1}P(T=t)$ for t = 2,3,4...
+```{r source_sBG, message=FALSE, warning=FALSE, include=FALSE}
+source('code/sBG.R')
+```
+
+```{r, warning=FALSE,message=FALSE,echo=FALSE}
+
+# define 'survivors' for each segment
+surv.R<-insamp.data$Regular[5]
+surv.H<-insamp.data$High_End[5]
+
+par.init=c(0,0)
+## regular segment:
+result.reg = optim(par=par.init,fn=sBG.LL,
+                    churn.data = insamp.data$Churn_R[2:5], 
+                    survivors = surv.H,control=list(fnscale=-1,reltol=1e-18))
+# result is in log-scale, so transforming it using exp()
+par.final.reg = exp(result.reg$par)
+## high end segment:
+result.high = optim(par=par.init,fn=sBG.LL,
+                    churn.data = insamp.data$Churn_H[2:5], 
+                    survivors = surv.H,control=list(fnscale=-1,reltol=1e-18))
+ par.final.high = exp(result.high$par)
+
+ print(paste('For high end segment, alpha is ', 
+             par.final.high[1], ' beta is', par.final.high[2]))
+pmf.reg<-sBG.pmf(par.final.reg[1],par.final.reg[2],12)
+
+pmf.high<-sBG.pmf(par.final.high[1],par.final.high[2],12)
+
+```
+In here, $\alpha$ and $\beta$ are obtained by maximizing the log-likelihood function defined by $$ \sum_{t=1}^{4} c_t \ln(P(T=t|\theta) + n_4 ln(P > 4|\theta),$$ where $c_i$ is the number of customers who churns at time $t$ and $n_4$ is the number of 'survivors' at the end of the $4^{th}$ season. 
+
+
+```{r}
+
+par.final<-rbind(par.final.reg,par.final.high)
+colnames(par.final)<-c('alpha','beta')
+row.names(par.final)<-c('Regular','High End')
+kable(par.final,col.names =colnames(par.final) )
+```
+
+
+```{r}
+data[,'Forecast_R']<-c(1,1-cumsum(pmf.reg))
+data[,'Forecast_H']<-c(1,1-cumsum(pmf.high))
+
+```
+
+Putting it all together:
+
+``` {r echo=FALSE, fig.align='center', fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+library(kableExtra)
+library(ggplot2)
+n<-1000
+ggplot(data)+geom_point(aes(x=Year,y=Regular/n,color='Actual'),alpha=0.8)+
+  geom_point(aes(x=Year,y=Forecast_R,color='Forecast'),alpha=0.8)+scale_colour_manual(values=c("blue","cyan"))+
+  labs(x='time period', y='# of remaining customers',title='Retention rates (actual vs forecast)\n for Regular segment')
+
+
+ggplot(data)+geom_point(aes(x=Year,y=High_End/n,color='Actual'),alpha=0.8)+
+  geom_point(aes(x=Year,y=Forecast_H,color='Forecast'),alpha=0.8)+scale_colour_manual(values=c("purple","magenta"))+
+  labs(x='time period', y='# of remaining customers',title='Retention rates (actual vs forecast)\n for High End segment')
+
+
+
+#plot_ly(data,x=~Year,y=~High_End)
+
+```
+
