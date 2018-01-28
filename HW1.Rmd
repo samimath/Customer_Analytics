@@ -5,8 +5,9 @@ date: "`r format(Sys.time(), '%b %d %Y')`"
 output: pdf_document
 ---
 
-### Projecting customer retention rates 
-We are given the following customer retention data,
+# Projecting customer retention rates 
+## Data
+We are given the following customer retention data,starting with 1000 customers, but gradually decreasing over 12 years. For this assignment, we will use only data from year 1-4:
 
 ```{r loadData, echo=FALSE, fig.align='center', fig.height=3, fig.width=4, message=FALSE, warning=FALSE}
 library(dplyr)
@@ -16,85 +17,91 @@ library(kableExtra)
 data<-read_excel('data/HW1 data.xlsx')
 data$Year<-as.factor(data$Year)
 names(data)<-c('Year','Regular','High_End')
-
-kable(data[1:5,])%>%kable_styling(full_width = FALSE)
+sample.size<-5
+kable(data[1:sample.size,])%>%kable_styling(full_width = FALSE)
 ```
 
 and the goal is to predict the following retention rates in the following periods:
 
 ``` {r,echo=FALSE,message=FALSE, warning=FALSE}
-kable(data[6:nrow(data),])%>%kable_styling(full_width = FALSE)
+kable(data[(sample.size+1):nrow(data),])%>%kable_styling(full_width = FALSE)
 ```
 
-Visualizing the customer population in temrs of % of total inital number of customers:
+Notice that the Regular segment has a significantly lower % of 'Alive' customers than the High End semengt:
 
-
-``` {r plotData,echo=FALSE, fig.align='center', fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
+``` {r plotData,echo=FALSE, fig.align='center', fig.height=2, fig.width=5, message=FALSE, warning=FALSE}
 library(kableExtra)
 library(ggplot2)
 n<-1000
 ggplot(data)+geom_point(aes(x=Year,y=Regular/n,color='Regular'),alpha=0.8)+
   geom_point(aes(x=Year,y=High_End/n,color='High End'),alpha=0.8)+
-  labs(x='time period', y='# of remaining customers',title='% of customers that remained for \n Regular and High End segments')+scale_colour_manual(values=c("purple","blue"))
+  labs(x='time period', y='# of remaining customers',title='   % of `Alive` customers overtime')+scale_colour_manual(values=c("purple","blue"))
 #plot_ly(data,x=~Year,y=~High_End)
 
 ```
-###
+## Basic statistics
 First, let's take a look at the churn rates and retention rates of each customer segment:
 
 ```{r massageData,fig.align='center',message=FALSE,warning=FALSE}
 data[,'Churn_R']<- c(0, -diff(data$Regular))
 data[,'Churn_H']<- c(0, -diff(data$High_End))
-data[,'Ret_R']<- data$Regular/lag(data$Regular,1)
-data[,'Ret_H']<- data$High_End/lag(data$High_End,1)
-insamp.data<-data[1:5,]
+data[,'Ret_R']<- data$Regular/1000
+data[,'Ret_H']<- data$High_End/1000
+insamp.data<-data[1:sample.size,]
 kable(insamp.data)
 ```
 
-Assuming we only have 4 seasons of data, there are 326 survivors and 593 survivors in the *Regular* and *High End* segment respectively. Based on this training data, we are interested in knowing the period $t$ in which a customer churns $P(T=t)$, with the following assumption:
+## Model
+Based on this training data, we are interested in knowing the period $t$ in which a customer churns $P(T=t)$, with the following assumption:
 
 - $\theta$ is the probability that a customer witll 'flip' and switch brands.
 
 - $P(T=t|\theta)$ is the probability that a customer 'flip' at time $t$ given $\theta$, which follows the geometric distribution with density $f(t|\theta) = \theta(1-\theta)^t$.
 
-- $\theta$ follows a density function $p(\theta)$ characterized by $\Gamma(\alpha,\beta)$.
+- $\theta$ follows a density function $g(\theta)$ characterized by $\Gamma(\alpha,\beta)$.
 
-Now, since $P(T=t) = \int_{0}^{1} f(t|\theta) p(\theta) d\theta$, after some algebra we can deduce that $P(T=t)$ follows the shifted Beta Geometric Distribution, which is defined by the following: $P(T=t) =  \frac{\alpha}{\alpha+\beta}$ for t = 1 and 
-$\frac{\beta + t -1}{\alpha + \beta + t -1}P(T=t)$ for t = 2,3,4...
+Now, since $P(T=t) = \int_{0}^{1} f(t|\theta) p(\theta) d\theta$, after some algebra we can deduce that $P(T=t)$ follows the shifted Beta Geometric Distribution, which is defined by the following: $$ P(T=t) =  \begin{cases}\frac{\alpha}{\alpha+\beta}  & \text{ for } t= 1, \\
+\frac{\beta + t -1}{\alpha + \beta + t -1}P(T=t-1) & \text{ for } t =  2, 3, 4,...\end{cases}.$$
+
+In here, $\alpha$ and $\beta$ are obtained by maximizing the log-likelihood function defined by $$ l(\alpha,\beta) = \sum_{t=1}^{4} c_t \ln(P(T=t|\theta)) + n_4 ln(P > 4|\theta),$$ where $c_i$ is the number of customers who churns at time $t$ and $n_4$ is the number of 'survivors' at the end of the $4^{th}$ season. 
+
+
 ```{r source_sBG, message=FALSE, warning=FALSE, include=FALSE}
 source('code/sBG.R')
 ```
 
+This parameter estimation procedure is implemented in R using the code provided in [`sBG.r`](https://github.com/samimath/Customer_Analytics/blob/master/code/sBG.R):
+
 ```{r, warning=FALSE,message=FALSE,echo=FALSE}
 
 # define 'survivors' for each segment
-surv.R<-insamp.data$Regular[5]
-surv.H<-insamp.data$High_End[5]
+surv.R<-insamp.data$Regular[nrow(insamp.data)]
+surv.H<-insamp.data$High_End[nrow(insamp.data)]
 
-par.init=c(0,0)
+par.init=c(0.6,0.6)
 ## regular segment:
 result.reg = optim(par=par.init,fn=sBG.LL,
-                    churn.data = insamp.data$Churn_R[2:5], 
-                    survivors = surv.H,control=list(fnscale=-1,reltol=1e-18))
+                    churn.data = insamp.data$Churn_R[2:nrow(insamp.data)], 
+                    survivors = surv.R,control=list(fnscale=-1,reltol=1e-18))
 # result is in log-scale, so transforming it using exp()
 par.final.reg = exp(result.reg$par)
 ## high end segment:
 result.high = optim(par=par.init,fn=sBG.LL,
-                    churn.data = insamp.data$Churn_H[2:5], 
+                    churn.data = insamp.data$Churn_H[2:nrow(insamp.data)], 
                     survivors = surv.H,control=list(fnscale=-1,reltol=1e-18))
- par.final.high = exp(result.high$par)
+par.final.high = exp(result.high$par)
 
- print(paste('For high end segment, alpha is ', 
-             par.final.high[1], ' beta is', par.final.high[2]))
 pmf.reg<-sBG.pmf(par.final.reg[1],par.final.reg[2],12)
+
 
 pmf.high<-sBG.pmf(par.final.high[1],par.final.high[2],12)
 
 ```
-In here, $\alpha$ and $\beta$ are obtained by maximizing the log-likelihood function defined by $$ \sum_{t=1}^{4} c_t \ln(P(T=t|\theta) + n_4 ln(P > 4|\theta),$$ where $c_i$ is the number of customers who churns at time $t$ and $n_4$ is the number of 'survivors' at the end of the $4^{th}$ season. 
 
+## Result
+Using 4 years of training data, we obtained the following best estimates for $\alpha$ and $\beta.$ Since both 
 
-```{r}
+```{r, echo=FALSE}
 
 par.final<-rbind(par.final.reg,par.final.high)
 colnames(par.final)<-c('alpha','beta')
@@ -103,17 +110,23 @@ kable(par.final,col.names =colnames(par.final) )
 ```
 
 
-```{r}
-data[,'Forecast_R']<-c(1,1-cumsum(pmf.reg))
-data[,'Forecast_H']<-c(1,1-cumsum(pmf.high))
 
+
+``` {r,echo=FALSE}
+data[,'Forecast_R']<-round(c(1,1-cumsum(pmf.reg)),2)
+data[,'Forecast_H']<-round(c(1,1-cumsum(pmf.high)),2)
+
+data[,'APE_R']<-round(abs(data$Ret_R-data$Forecast_R)/data$Ret_R,2)
+
+data[,'APE_H']<-round(abs(data$Ret_H-data$Forecast_H)/data$Ret_H,2)
 ```
+
 
 Putting it all together:
 
 ``` {r echo=FALSE, fig.align='center', fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
-library(kableExtra)
-library(ggplot2)
+
+
 n<-1000
 ggplot(data)+geom_point(aes(x=Year,y=Regular/n,color='Actual'),alpha=0.8)+
   geom_point(aes(x=Year,y=Forecast_R,color='Forecast'),alpha=0.8)+scale_colour_manual(values=c("blue","cyan"))+
@@ -126,7 +139,39 @@ ggplot(data)+geom_point(aes(x=Year,y=High_End/n,color='Actual'),alpha=0.8)+
 
 
 
-#plot_ly(data,x=~Year,y=~High_End)
+```
 
+```{r,echo=FALSE,fig.height=2.5}
+kable(data[2:nrow(data),c('Year','Ret_R','Forecast_R','APE_R','Ret_H','Forecast_H','APE_H')])
+insample.MAPE<-c(mean(data$APE_R[2:sample.size]),mean(data$APE_H[2:sample.size]))
+outsample.MAPE<-c(mean(data$APE_R[(sample.size+1):nrow(data)]),mean(data$APE_H[(sample.size+1):nrow(data)]))
+```
+
+## Conclusion
+
+In here, we calculate the in and out-of-sample average percent error. While both in-sample MAPE is relatively small (0.5 % and 1% respecitvely), we see that the out-of-sample MAPE get a lot higher (6% and 13% respecitvely). Interestingly, when we compare the MAPE using 4 years of data vs that trained from 7 years of data, we see a better in-sample MAPE. This suggests that 4 years of data provide a better fit. However, the out-of-sample MAPE did a lot worse when using the model trained by 4 years of data, so even though it has a good fit, it is not as predictive compared to the model that uses 7 years of data.
+
+
+```{r, echo=FALSE}
+High_End_7<-c(0.017,0.028)
+MAPE<-rbind(insample.MAPE,outsample.MAPE)
+MAPE<-cbind(MAPE,High_End_7)
+kable(MAPE,col.names = c('Regular','High End','High End (7 years data)'))
+
+```
+
+
+
+Another interesting point, we observed that comparing to the example (where $\alpha = 0.668$ and $\beta = 3.806$) done in class, both $\alpha$ and $\beta$ here are estimated to be higher, which changes the density quite a bit as it movies the curve for $g(\theta)$ to an entirely different quadrant. 
+
+
+```{r,echo=FALSE,out.width='.5\\linewidth', fig.width=5, fig.height=4,fig.align='center',message=FALSE,warning=FALSE}
+theta<-seq(from=0,to=1,by=0.01)
+beta7<-dbeta(theta,0.668083,3.806053)
+beta4<-dbeta(theta,par.final.high[1],par.final.high[2])
+compare.plt<-cbind(theta,beta7,beta4)
+compare.plt<-data.frame(compare.plt)
+ggplot(compare.plt)+geom_line(aes(theta,beta7,color='with 7 years'))+geom_line(aes(theta,beta4,color='with 4 years'))+labs(y='frequency')
+#grid.arrange(plt7, plt4, ncol=2)
 ```
 
