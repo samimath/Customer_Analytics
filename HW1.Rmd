@@ -1,13 +1,18 @@
 ---
-title: "MKT 500T HW 1"
+title: "MKT 500T"
 author: "Sami Cheong"
 date: "`r format(Sys.time(), '%b %d %Y')`"
-output: pdf_document
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+subtitle: Spring 2018 HW1
+geometry: left=3cm,right=3cm,top=2cm,bottom=2cm
 ---
 
 # Projecting customer retention rates 
-## Data
-We are given the following customer retention data,starting with 1000 customers, but gradually decreasing over 12 years. For this assignment, we will use only data from year 1-4:
+# Data
+We are given the following customer retention data,starting with 1000 customers, but gradually decreasing over 12 years. For this assignment, we will use data from years 1-4:
 
 ```{r loadData, echo=FALSE, fig.align='center', fig.height=3, fig.width=4, message=FALSE, warning=FALSE}
 library(dplyr)
@@ -21,7 +26,7 @@ sample.size<-5
 kable(data[1:sample.size,])%>%kable_styling(full_width = FALSE)
 ```
 
-and the goal is to predict the following retention rates in the following periods:
+to predict the following retention rates in the following periods:
 
 ``` {r,echo=FALSE,message=FALSE, warning=FALSE}
 kable(data[(sample.size+1):nrow(data),])%>%kable_styling(full_width = FALSE)
@@ -51,16 +56,16 @@ insamp.data<-data[1:sample.size,]
 kable(insamp.data)
 ```
 
-## Model
-Based on this training data, we are interested in knowing the period $t$ in which a customer churns $P(T=t)$, with the following assumption:
+# Model
+Based on this training data, we are interested in knowing the period $t$ in which a customer churns $P(T=t)$, with the following assumptions:
 
-- $\theta$ is the probability that a customer witll 'flip' and switch brands.
+- $\theta$ is the probability that a customer witll 'flip' and switch brands
 
-- $P(T=t|\theta)$ is the probability that a customer 'flip' at time $t$ given $\theta$, which follows the geometric distribution with density $f(t|\theta) = \theta(1-\theta)^t$.
+- $P(T=t|\theta)$ is the probability that a customer 'flip' at time $t$ given $\theta$, which follows the geometric distribution with density $f(t|\theta) = \theta(1-\theta)^t$
 
 - $\theta$ follows a density function $g(\theta)$ characterized by $\Gamma(\alpha,\beta)$.
 
-Now, since $P(T=t) = \int_{0}^{1} f(t|\theta) p(\theta) d\theta$, after some algebra we can deduce that $P(T=t)$ follows the shifted Beta Geometric Distribution, which is defined by the following: $$ P(T=t) =  \begin{cases}\frac{\alpha}{\alpha+\beta}  & \text{ for } t= 1, \\
+Since $P(T=t) = \int_{0}^{1} f(t|\theta) p(\theta) d\theta$, after some algebra we can deduce that $P(T=t)$ follows the shifted Beta Geometric Distribution, which is defined by the following: $$ P(T=t) =  \begin{cases}\frac{\alpha}{\alpha+\beta}  & \text{ for } t= 1, \\
 \frac{\beta + t -1}{\alpha + \beta + t -1}P(T=t-1) & \text{ for } t =  2, 3, 4,...\end{cases}.$$
 
 In here, $\alpha$ and $\beta$ are obtained by maximizing the log-likelihood function defined by $$ l(\alpha,\beta) = \sum_{t=1}^{4} c_t \ln(P(T=t|\theta)) + n_4 ln(P > 4|\theta),$$ where $c_i$ is the number of customers who churns at time $t$ and $n_4$ is the number of 'survivors' at the end of the $4^{th}$ season. 
@@ -70,49 +75,60 @@ In here, $\alpha$ and $\beta$ are obtained by maximizing the log-likelihood func
 source('code/sBG.R')
 ```
 
-This parameter estimation procedure is implemented in R using the code provided in [`sBG.r`](https://github.com/samimath/Customer_Analytics/blob/master/code/sBG.R):
+This parameter estimation procedure is implemented in R using the code provided in [`sBG.r`](https://github.com/samimath/Customer_Analytics/blob/master/code/sBG.R), presented as follows:
 
-```{r, warning=FALSE,message=FALSE,echo=FALSE}
+```{r, warning=FALSE,message=FALSE,echo}
 
 # define 'survivors' for each segment
 surv.R<-insamp.data$Regular[nrow(insamp.data)]
 surv.H<-insamp.data$High_End[nrow(insamp.data)]
 
 par.init=c(0.6,0.6)
-## regular segment:
+# get optimized parameter values for Regular and High End segments:
 result.reg = optim(par=par.init,fn=sBG.LL,
                     churn.data = insamp.data$Churn_R[2:nrow(insamp.data)], 
                     survivors = surv.R,control=list(fnscale=-1,reltol=1e-18))
-# result is in log-scale, so transforming it using exp()
 par.final.reg = exp(result.reg$par)
-## high end segment:
+
 result.high = optim(par=par.init,fn=sBG.LL,
                     churn.data = insamp.data$Churn_H[2:nrow(insamp.data)], 
                     survivors = surv.H,control=list(fnscale=-1,reltol=1e-18))
 par.final.high = exp(result.high$par)
 
+# compute density function values:
 pmf.reg<-sBG.pmf(par.final.reg[1],par.final.reg[2],12)
 
 
 pmf.high<-sBG.pmf(par.final.high[1],par.final.high[2],12)
 
+# compute log-likelihood valuse:
+LL.reg<-sBG.LL(par.final.reg,insamp.data$Churn_R[2:nrow(insamp.data)],
+               surv.R,debug.flag=F)
+
+LL.high<-sBG.LL(par.final.high,insamp.data$Churn_H[2:nrow(insamp.data)],
+                surv.H,debug.flag=F)
+
+# collect values:
+LL<-c(LL.reg,LL.high)
+
 ```
 
-## Result
-Using 4 years of training data, we obtained the following best estimates for $\alpha$ and $\beta.$ Since both 
+# Result
+Using 4 years of training data, we obtained the following best estimates for $\alpha$ and $\beta.$ Notice that estimates for the High End segment has a worse likelihood value than the Regular segment, this suggests that the High End model may not have as good a fit compared to the Regular one. 
 
 ```{r, echo=FALSE}
 
 par.final<-rbind(par.final.reg,par.final.high)
-colnames(par.final)<-c('alpha','beta')
+par.final<-cbind(par.final,LL)
+colnames(par.final)<-c('alpha','beta','log-likelihood')
 row.names(par.final)<-c('Regular','High End')
 kable(par.final,col.names =colnames(par.final) )
 ```
 
+Putting it all together:
 
 
-
-``` {r,echo=FALSE}
+``` {r}
 data[,'Forecast_R']<-round(c(1,1-cumsum(pmf.reg)),2)
 data[,'Forecast_H']<-round(c(1,1-cumsum(pmf.high)),2)
 
@@ -122,7 +138,8 @@ data[,'APE_H']<-round(abs(data$Ret_H-data$Forecast_H)/data$Ret_H,2)
 ```
 
 
-Putting it all together:
+
+
 
 ``` {r echo=FALSE, fig.align='center', fig.height=3, fig.width=5, message=FALSE, warning=FALSE}
 
@@ -147,31 +164,54 @@ insample.MAPE<-c(mean(data$APE_R[2:sample.size]),mean(data$APE_H[2:sample.size])
 outsample.MAPE<-c(mean(data$APE_R[(sample.size+1):nrow(data)]),mean(data$APE_H[(sample.size+1):nrow(data)]))
 ```
 
-## Conclusion
+## Comparing model trained on 4 years vs 7 years of data:
 
-In here, we calculate the in and out-of-sample average percent error. While both in-sample MAPE is relatively small (0.5 % and 1% respecitvely), we see that the out-of-sample MAPE get a lot higher (6% and 13% respecitvely). Interestingly, when we compare the MAPE using 4 years of data vs that trained from 7 years of data, we see a better in-sample MAPE. This suggests that 4 years of data provide a better fit. However, the out-of-sample MAPE did a lot worse when using the model trained by 4 years of data, so even though it has a good fit, it is not as predictive compared to the model that uses 7 years of data.
-
+In here, we calculate the in and out-of-sample average percent error for model trained with 4 years. While both in-sample MAPE is relatively small (0.5 % and 1% respecitvely), the out-of-sample MAPE's are much higher (6% and 13% respecitvely). Repeating the same procedure using 7 years of data instead gives the following:
 
 ```{r, echo=FALSE}
 High_End_7<-c(0.017,0.028)
+Regular_7<-c(0.011,0.015)
 MAPE<-rbind(insample.MAPE,outsample.MAPE)
-MAPE<-cbind(MAPE,High_End_7)
-kable(MAPE,col.names = c('Regular','High End','High End (7 years data)'))
+MAPE<-cbind(MAPE,Regular_7,High_End_7)
+kable(MAPE,col.names = c('Regular','High End','Regular (7 years data)','High End (7 years data)'))
 
 ```
 
+Interestingly, MAPE's from models trained with 4 years of data were actually lower when we looking at in-sample data. This suggests that they provide a better fit for the data, but ultimately the models are not as predictive compared to those that used 7 years of data.
 
 
-Another interesting point, we observed that comparing to the example (where $\alpha = 0.668$ and $\beta = 3.806$) done in class, both $\alpha$ and $\beta$ here are estimated to be higher, which changes the density quite a bit as it movies the curve for $g(\theta)$ to an entirely different quadrant. 
 
 
-```{r,echo=FALSE,out.width='.5\\linewidth', fig.width=5, fig.height=4,fig.align='center',message=FALSE,warning=FALSE}
+### How did the training data change the underlying distribution for $g(\theta)$?
+
+Another interesting observation is that, comparing to the example for High End data set (where $\alpha = 0.668$ and $\beta = 3.806$), both $\alpha$ and $\beta$ here are estimated to be higher when using less traiing data. This changes the density quite a bit as it moves the curve for $g(\theta)$ to an entirely different quadrant, linking that to the MAPE, we see that the discrepensies between the High End models trianed are much higher compared to those using the data from the Regular segment. 
+
+
+```{r,fig.height=2,echo=FALSE,fig.align='center',message=FALSE,warning=FALSE}
 theta<-seq(from=0,to=1,by=0.01)
-beta7<-dbeta(theta,0.668083,3.806053)
-beta4<-dbeta(theta,par.final.high[1],par.final.high[2])
-compare.plt<-cbind(theta,beta7,beta4)
+beta7_high<-dbeta(theta,0.668083,3.806053)
+beta4_high<-dbeta(theta,par.final.high[1],par.final.high[2])
+
+beta7_reg<-dbeta(theta,0.704,1.182)
+beta4_reg<-dbeta(theta,par.final.reg[1],par.final.reg[2])
+
+
+compare.plt<-cbind(theta,beta7_high,beta4_high, beta7_reg,beta4_reg)
 compare.plt<-data.frame(compare.plt)
-ggplot(compare.plt)+geom_line(aes(theta,beta7,color='with 7 years'))+geom_line(aes(theta,beta4,color='with 4 years'))+labs(y='frequency')
+ggplot(compare.plt)+geom_line(aes(theta,beta7_high,color='High End model with 7 years of data'))+
+  geom_line(aes(theta,beta4_high,color='High End model  with 4 years of data'))+labs(y='frequency')
+
+ggplot(compare.plt)+geom_line(aes(theta,beta7_reg,color='Regular model with 7 years of data'))+
+  geom_line(aes(theta,beta4_reg,color='Regular model with 4 years of data'))+labs(y='frequency')
 #grid.arrange(plt7, plt4, ncol=2)
 ```
+
+## Conclusion
+
+In this assignment, we investigated the following:
+
+- Analyzed two sets of customer churn data over 12 years
+- Applied the shifted Beta-Geometric distribution to model the probability of churn ($\theta$)
+- Estimated the parameters ($\alpha, \beta$) that govern $\theta$ using maximum-likelihood estimation
+- Compared model performance using 4 years of trianing data vs 7 years of training data
 
