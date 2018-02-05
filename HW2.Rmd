@@ -1,0 +1,410 @@
+---
+title: "MKT 500T"
+author: "Sami Cheong"
+date: "`r format(Sys.time(), '%b %d %Y')`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+subtitle: Spring 2018 HW2
+geometry: left=3cm,right=3cm,top=2cm,bottom=2cm
+keep_tex: true
+---
+
+# Q1. Modeling count data
+
+## Data
+
+We are given a sample of Internet visit data for a set of 2728 individuals. A quick first look at the data tells us this data set has a high proportion of 0 visitors:
+```{r DataSummary, echo=FALSE,warning=FALSE,message=FALSE}
+
+
+#source('code/util.R')
+
+
+
+```
+
+
+```{r DataSummary_count,echo=TRUE,warning=FALSE,message=FALSE,fig.height=4}
+library(ggplot2)
+library(knitr)
+library(readxl)
+library(dplyr)
+data<-read_excel('data/khakichinos HW2 data.xlsx',sheet = 1)
+
+data[,'Freq']<-ifelse(data$Visits <10, data$Visits,'10+')
+
+data_grouped<-data%>%group_by(Freq)%>%
+  summarise(total_visits=n())
+
+data_grouped$Freq<-factor(data_grouped$Freq, levels = c(0:9,'10+'))
+
+ggplot(data_grouped)+geom_col(aes(x=as.integer(Freq),y=total_visits,fill=Freq))+
+  labs(x='# of visits',y='# of customers')
+
+```
+
+
+The goal of this question is to model the above data using the Poisson Distribution and Negative Binomial distribution, as well as their zero-inflated versions. In geneal, to estimate the parameters for each of the distribution, we start with a set of initial values, then use the `optim` function in R to solve for the optimal parameters with respect to the likelihood function that are computed for every combination of parameter values and the observations given. Below is the implementation of calculating log-likelihood function for a given pmf:
+
+```{r}
+getLL<-function(count.data,pmf,par,debug=F){
+  
+  pmf.val<-pmf(count.data,par)
+  
+  LL.val<-sum(log10(pmf.val))
+  if(debug){
+    plot(count.data,pmf.val,type = 'l')
+    print(pmf.val)
+    print(log10(pmf.val))
+    print(LL.val)
+  }
+  
+  return(LL.val)
+}
+
+```
+\newpage
+
+## 1(a) Poisson Distribution
+Our first task is to model the data using the Poisson distribution. The discrete distribution has a probability mass funciton definted as $$  p(X=x| \lambda) = \frac{\lambda^x e^{-\lambda}}{x!}, \lambda >0, x= 0, 1, 2,3... . $$ The code to generate the Poisson distribution is the implemented below:
+
+```{r Poisson, echo=TRUE,warning=F,message=F}
+
+POIS.pmf<-function(count.data,par){
+  N<-length(count.data)
+  lambda<-par[1]
+  pmf.val = vector("numeric",N)
+  for (n in 1:N){
+    x<-count.data[n]
+    pmf.val[n]<-ifelse(lambda>0, (lambda^x)*exp(-lambda)/(factorial(x)),0)  
+  }
+  return(pmf.val)
+}
+
+Poisson.par.opt<-optim(par=2.5,fn=getLL,pmf=POIS.pmf,debug=F,
+                       count.data =data$Visits, method = 'L-BFGS-B', 
+                       control=list(fnscale=-1),lower=1e-10,hessian = T)
+print(paste('Optimal parameters:',Poisson.par.opt$par))
+
+print(paste('Log-likelihood:', Poisson.par.opt$value))
+
+
+```
+
+After optimizing, the $\lambda$ value for the best-fit Poisson distribution is 0.9494138, so we use that to compute the probability of visits at different frequencies:
+
+```{r PoissonFit}
+df<-nrow(data)-length(Poisson.par.opt$par)-1
+data[,'PoissonFit']<-POIS.pmf(data$Visits,par=Poisson.par.opt$par)
+data[,'PoissonLL']<-log10(data$PoissonFit)
+data[,'Chi2Pois']<-(data$PoissonFit-data$Visits)^2/(data$PoissonFit)
+#kable(head(data[,c('Visits','PoissonFit','PoissonLL','Chi2Pois')]),align = 'c')
+```
+
+```{r PoissonFitPlot, echo=FALSE,warning=F,fig.height=4}
+summarize.Preds<-function(col=PoissonFit,data,dist){
+PoissonModel<-data %>% group_by(Freq)%>%
+  summarise(Actual = n(),
+            Expected=2728*mean(PoissonFit),
+            Chi2=(Actual-Expected)^2/Expected)
+PoissonModel<-PoissonModel[order(PoissonModel$Freq),]
+PoissonModel$Freq<-factor(PoissonModel$Freq, levels = c(0:9,'10+'))
+PoissonModel<-PoissonModel[order(PoissonModel$Freq),]
+
+
+
+
+
+plt<-ggplot(PoissonModel)+geom_point(aes(x=Freq,y=Actual,color='Actual',size=Actual),alpha=0.5)+
+  geom_point(aes(x=Freq,y=Expected,color=dist,size=Expected))+
+  labs(x='# of visits',y='Frequency')+ggtitle(paste0('Comparing ', dist, ' Model to Actual Data'))
+df_model<-nrow(PoissonModel)-2
+Chi2<-sum(PoissonModel$Chi2)
+pval<-round(pchisq(sum(PoissonModel$Chi2), df=df_model, lower.tail = FALSE),2)
+print(plt)
+print(paste('ChiSquare  for ', dist, 'is ', Chi2, 'p-val is', pval, ' with ', df_model, ' df'))
+return(PoissonModel)  
+}
+
+summary<-summarize.Preds(col=PoissonFit,data,'Poisson')
+kable(summary)
+```
+
+
+
+Overall, the Poisson distribution does not seem to be a very good fit. Visually, we can see that the model tends to over-estimate in ther smaller range and under estimate in the higher range. The not-so-good performance of the Poisson model is also shown in the high $\chi^2$ value and low p-value, which rejects the probability that the model and the actual data comes from the same distribution.
+
+\newpage
+
+## 1(b) Poisson Distribution with Zero-Spikes
+
+The zero-inflated Poisson distribution is defined as $$ P(X=x) = \begin{cases} p_0 + (1-p_0)Poi(\lambda) & \text{if x = 0} \\(1-p_0)Poi(\lambda) & \text{else}  \end{cases}.$$
+  
+```{r PoissonZFit,echo=FALSE}
+POIS.pmf.zero<-function(count.data,par){
+  lambda<-par[1]
+  p0<-par[2]
+  
+  zero.case<-p0+(1-p0)*POIS.pmf(count.data,par[1])
+  nonzero.case<-(1-p0)*POIS.pmf(count.data,par[1])
+  pmf<-ifelse(count.data==0,zero.case,nonzero.case)
+  
+  return(pmf)
+}
+
+
+# Fit data with zero-inflated Poisson:
+POISZ.par.opt<-optim(par=c(0.1,0.5),fn=getLL,pmf=POIS.pmf.zero,debug=F,
+                     count.data =data$Visits, method = 'L-BFGS-B', control=list(fnscale=-1),lower=1e-10,hessian = T)
+
+print('Optimal parameters for zero-inflated Poisson Distribution:',POISZ.par.opt$par)
+
+print(paste( 'Log-likelihood is :',POISZ.par.opt$value))
+
+
+data[,'PoissonZ']<-POIS.pmf.zero(data$Visits,POISZ.par.opt$par)
+data[,'PoissonZ.LL']<-log(data$PoissonZ)
+
+
+Model<-data %>% group_by(Freq)%>%
+  summarise(Actual = n(),
+            Expected=2728*mean(PoissonZ),
+            Chi2=(Actual-Expected)^2/Expected)
+Model<-Model[order(Model$Freq),]
+Model$Freq<-factor(Model$Freq, levels = c(0:9,'10+'))
+Model<-Model[order(Model$Freq),]
+
+
+
+
+Chi2<-sum(Model$Chi2)
+df_model<-nrow(Model)-3
+dist<-'Zero-inflated Poisson'
+pval<-round(pchisq(sum(Model$Chi2), df=df_model, lower.tail = FALSE),2)
+
+plt<-ggplot(Model)+geom_point(aes(x=Freq,y=Actual,color='Actual',size=Actual),alpha=0.5)+
+  geom_point(aes(x=Freq,y=Expected,color=dist,size=Expected))+
+  labs(x='# of visits',y='Frequency')+ggtitle(paste0('Comparing ', dist, ' Model to Actual Data'))
+
+print(plt)
+
+
+kable(Model)
+
+
+```
+
+
+After adjusting for the spike at zero, the Zero-inflated Poisson seems to be doing a much better job at capturing the # of people that will never visit the site. However, it is still showing quite a bit of error in the mid-range, as evidenced by the $\chi^2$ values.
+
+
+
+
+\newpage
+## 1(c) Negative Binomial Distribution
+
+The NBD is defined as $$ P(X=x|\alpha, r) = \frac{\Gamma(x+r)}{x!\Gamma{r}}(\frac{\alpha}{1+\alpha})^r (\frac{1}{1+\alpha})^x$$. The parameters that result in the highest log-likelihood values are 0.13387 and 0.14101 respectively for $r$ and $\alpha.$
+
+```{r}
+NBD.pmf<-function(count.data,par){
+  N<-length(count.data)
+  pmf.val = vector("numeric",N)
+  for (n in 1:N){
+    x<-count.data[n]
+    gamma.top<-(gamma(x+par[1]))
+    gamma.bot<-factorial(x)*gamma(par[1])
+    p1<-par[2]/(1+par[2])
+    p2<- 1-p1     
+    pmf.val[n]<-(gamma.top/gamma.bot)*(p1^par[1])*(p2^x)  
+  }
+  return(pmf.val)
+}
+
+
+
+NBD.par.opt<-optim(par=c(0.1,0.1),fn=getLL,pmf=NBD.pmf,
+                   count.data =data$Visits, method="L-BFGS-B",
+                   control=list(fnscale=-1), lower=1e-10)
+
+print('Optimal paramters for NBD:')
+print(NBD.par.opt$par)
+print('Log-likelihood:')
+print(NBD.par.opt$value)
+
+```
+
+```{r NBDFit, echo=FALSE}
+data[,'NBD']<-NBD.pmf(data$Visits,NBD.par.opt$par)
+data[,'NBDLL']<-log(data$NBD)
+
+
+Model<-data %>% group_by(Freq)%>%
+  summarise(Actual = n(),
+            Expected=2728*mean(NBD),
+            Chi2=(Actual-Expected)^2/Expected)
+Model<-Model[order(Model$Freq),]
+Model$Freq<-factor(Model$Freq, levels = c(0:9,'10+'))
+Model<-Model[order(Model$Freq),]
+
+
+
+
+Chi2<-sum(Model$Chi2)
+df_model<-nrow(Model)-3
+dist<-'NBD'
+pval<-round(pchisq(sum(Model$Chi2), df=df_model, lower.tail = FALSE),2)
+
+plt<-ggplot(Model)+geom_point(aes(x=Freq,y=Actual,color='Actual',size=Actual),alpha=0.5)+
+  geom_point(aes(x=Freq,y=Expected,color=dist,size=Expected))+
+  labs(x='# of visits',y='Frequency')+ggtitle(paste0('Comparing ', dist, ' Model to Actual Data'))
+
+print(plt)
+
+#print(paste('Chi squre p-value: ', pval))
+
+
+kable(Model)
+
+```
+
+Comparing to the Poisson models, the Negative Bionomial distribution does a much better job at fitting this set of data (as seen in the lower overall $\chi^2$ value). However, we are still seeing a few parts of the data where the model is not predicting a good enough value, for example, at frequency 1, and 10+.
+
+
+\newpage
+##1(d) Zero-inflated NBD:
+
+Similar as above, we impose an additional parameter in the zero-inflated NBD by defining $$ P(X=x) = p_0 + (1-p_0) * NBD(x|r,\alpha). $$ This gives us almost exactly the same parameter values for $r$ and $\alpha,$ with $p_0 = 1e^{-10},$ which is virtually zero. 
+
+
+
+```{r NBDZpmf,echo=TRUE}
+
+NBD.pmf.zero<-function(count.data,par){
+ p0 <-par[3]/(1+par[3])
+ 
+ #p0 <-par[3]
+ r<-par[1]
+ alpha<-par[2]
+ zero.case<-p0+(1-p0)*NBD.pmf(count.data,c(par[1],par[2]))
+ nonzero.case<-(1-p0)*NBD.pmf(count.data,c(par[1],par[2]))
+ pmf<-ifelse(count.data==0,zero.case,nonzero.case)
+ #print(pmf)
+ #print(pmf)
+ return(pmf)
+}
+
+NBDZ.par.opt<-optim(par=c(0.2,0.2,5),fn=getLL,pmf=NBD.pmf.zero,
+                    count.data =data$Visits, method="L-BFGS-B",
+                    control=list(fnscale=-1), lower=1e-10)
+
+print('Optimal paramters for zero-inflated NBD:')
+print(NBDZ.par.opt$par)
+print('Log-likelihood:')
+print(NBDZ.par.opt$value)
+```
+
+```{r NBDZFit, echo=FALSE}
+
+data[,'NBDZ']<-NBD.pmf.zero(data$Visits,par=NBDZ.par.opt$par)
+data[,'NBDZLL']<-log(data$NBDZ)
+
+Model<-data %>% group_by(Freq)%>%
+  summarise(Actual = n(),
+            Expected=2728*mean(NBDZ),
+            Chi2=(Actual-Expected)^2/Expected)
+Model<-Model[order(Model$Freq),]
+Model$Freq<-factor(Model$Freq, levels = c(0:9,'10+'))
+Model<-Model[order(Model$Freq),]
+
+
+
+
+Chi2<-sum(Model$Chi2)
+df_model<-nrow(Model)-3
+dist<-'NBDZ'
+pval<-round(pchisq(sum(Model$Chi2), df=df_model, lower.tail = FALSE),2)
+
+plt<-ggplot(Model)+geom_point(aes(x=Freq,y=Actual,color='Actual',size=Actual),alpha=0.5)+
+  geom_point(aes(x=Freq,y=Expected,color=dist,size=Expected))+
+  labs(x='# of visits',y='Frequency')+ggtitle(paste0('Comparing ', dist, ' Model to Actual Data'))
+
+print(plt)
+
+#print(paste('Chi squre p-value: ', pval))
+
+
+kable(Model)
+```
+
+
+## Comments on Question 1 results:
+
+We've tried 4 different models, while it is clear that the Negative Binomial Distribution provides a better fit compared to the Poisson model, we are still seeing cases where the $\chi^2$ is higher that we'd like. This could be due to the fact that we only have one feature from the data set to work with. Another interesting observation is that the zero-inflated NBD gives very similar result to the original NBD, this gives evidence that the NBD model by itself already does a fairly good job at handling the 0 visit caes, so adjustment in this case is not necessary.
+
+
+
+
+# Question 2: Modeling Survey Data
+
+## Data Overview:
+```{r}
+library(ggplot2)
+survey<-read_excel('data/Survey HW2.xlsx',sheet = 'Raw Data')
+kable(survey)
+survey$`Number of Survey`<-factor(survey$`Number of Survey`,levels=c(0,1,2,'[3,5]','6+'))
+ggplot(survey)+geom_col(aes(x=survey$`Number of Survey`,y=survey$Percentage,fill=survey$Respondents),alpha=0.7)
+
+```
+
+
+
+In this data set, we can use the recursive formula for NBD, which is defined as $$  P(X=x) = \begin{cases} (\frac{\alpha}{\alpha+1})^r & x= 0 \\ \frac{r+x-1}{x(\alpha+1)} P(X= x-1) & x = 1,2,3..\end{cases}$$
+
+Using the above formula, we can calculate the probability all the $x$ values, and the log-likelihood is defined as:
+
+$$ LL = \sum_{k=1}^{2} n_k log P(X=k) + \log n_{3-5} \sum_{k=3}^{5}P(X=k) + \log n_{6+} (1 - \sum_{k=0}^{5} P(X=k)$$
+
+```{r NBDRecursive,echo=FALSE}
+NBD.recur<-function(data,par){
+  N<-length(data)
+  alpha<-par[1]
+  r<-par[2]
+  pmf<-vector(mode = 'numeric',N)
+  
+  pmf[1]<-(alpha/(1+alpha))^r
+  
+  if (N > 1) {
+    for (x in 2:N) {
+      pmf[x] = pmf[x-1]*(r + x - 1)/(x*(alpha+1))
+    }
+  }
+  return(pmf);
+}
+    
+lambda <-2.6366570197636
+r<-1.19116
+alpha<-0.38168
+best.fit.NBD<-
+NBD<-vector('numeric',5)
+NBD[1:3]<-dnbinom(0:2,r,alpha)
+NBD[4]<-sum(dnbinom(3:5,r,alpha))
+NBD[5]<-1-sum(NBD[1:4])
+survey[,'NBD']<-1865*NBD
+POI<-vector('numeric',5)
+POI[1:3]<-dpois(0:2,lambda)
+POI[4]<-sum(dpois(3:5,lambda))
+POI[5]<-1-sum(POI[1:4])
+survey[,'POI']<-1865*POI
+
+ggplot(survey)+geom_point(aes(x=survey$`Number of Survey`,y=survey$NBD,color='Negative Binomial'),alpha=0.7)+
+geom_point(aes(x=survey$`Number of Survey`,y=survey$Respondents,color='Actual'))
+
+
+ggplot(survey)+geom_point(aes(x=survey$`Number of Survey`,y=survey$POI,color='Poisson'))+
+geom_point(aes(x=survey$`Number of Survey`,y=survey$Respondents,color='Actual'))
+
+
+
+```
