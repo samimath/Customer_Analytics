@@ -81,40 +81,40 @@ getLL<-function(count.data,pmf,par,debug=F){
 
 ## HW2:
 
-data<-read_excel('data/khakichinos HW2 data.xlsx',sheet = 1)
-
-Poisson.par.opt<-optim(par=2.5,fn=getLL,pmf=POIS.pmf,debug=F,
-                       count.data =data$Visits, method = 'L-BFGS-B', control=list(fnscale=-1),lower=1e-10,hessian = T)
-print('Optimal parameters for Poisson Distribution:')
-print(Poisson.par.opt$par)
-print('Log-likelihood:')
-print(Poisson.par.opt$value)
-
-# Fit data with zero-inflated Poisson:
-POISZ.par.opt<-optim(par=c(0.1,0.5),fn=getLL,pmf=POIS.pmf.zero,debug=F,
-                     count.data =data$Visits, method = 'L-BFGS-B', control=list(fnscale=-1),lower=1e-10,hessian = T)
-
-print('Optimal parameters for zero-inflated Poisson Distribution:')
-print(POISZ.par.opt$par)
-print('Log-likelihood:')
-print(POISZ.par.opt$value)
-
-# Fit data with NBD:
-
-NBD.par.opt<-optim(par=c(0.1,0.1),fn=getLL,pmf=NBD.pmf,
-                   count.data =data$Visits, method="L-BFGS-B",control=list(fnscale=-1), lower=1e-10)
-
-print('Optimal paramters for NBD:')
-print(NBD.par.opt$par)
-print('Log-likelihood:')
-print(NBD.par.opt$value)
-
-# Fit data with zero-inflated NBD:
-NBDZ.par.opt<-optim(par=c(0.2,0.2,5),fn=getLL,pmf=NBD.pmf.zero,
-                    count.data =data$Visits, method="L-BFGS-B",control=list(fnscale=-1), lower=1e-10)
-
-print('Optimal paramters for zero-inflated NBD:')
-print(NBDZ.par.opt$par)
-print('Log-likelihood:')
-print(NBDZ.par.opt$value)
-
+# data<-read_excel('data/khakichinos HW2 data.xlsx',sheet = 1)
+# 
+# Poisson.par.opt<-optim(par=2.5,fn=getLL,pmf=POIS.pmf,debug=F,
+#                        count.data =data$Visits, method = 'L-BFGS-B', control=list(fnscale=-1),lower=1e-10,hessian = T)
+# print('Optimal parameters for Poisson Distribution:')
+# print(Poisson.par.opt$par)
+# print('Log-likelihood:')
+# print(Poisson.par.opt$value)
+# 
+# # Fit data with zero-inflated Poisson:
+# POISZ.par.opt<-optim(par=c(0.1,0.5),fn=getLL,pmf=POIS.pmf.zero,debug=F,
+#                      count.data =data$Visits, method = 'L-BFGS-B', control=list(fnscale=-1),lower=1e-10,hessian = T)
+# 
+# print('Optimal parameters for zero-inflated Poisson Distribution:')
+# print(POISZ.par.opt$par)
+# print('Log-likelihood:')
+# print(POISZ.par.opt$value)
+# 
+# # Fit data with NBD:
+# 
+# NBD.par.opt<-optim(par=c(0.1,0.1),fn=getLL,pmf=NBD.pmf,
+#                    count.data =data$Visits, method="L-BFGS-B",control=list(fnscale=-1), lower=1e-10)
+# 
+# print('Optimal paramters for NBD:')
+# print(NBD.par.opt$par)
+# print('Log-likelihood:')
+# print(NBD.par.opt$value)
+# 
+# # Fit data with zero-inflated NBD:
+# NBDZ.par.opt<-optim(par=c(0.2,0.2,5),fn=getLL,pmf=NBD.pmf.zero,
+#                     count.data =data$Visits, method="L-BFGS-B",control=list(fnscale=-1), lower=1e-10)
+# 
+# print('Optimal paramters for zero-inflated NBD:')
+# print(NBDZ.par.opt$par)
+# print('Log-likelihood:')
+# print(NBDZ.par.opt$value)
+# 

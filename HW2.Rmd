@@ -354,7 +354,8 @@ library(ggplot2)
 survey<-read_excel('data/Survey HW2.xlsx',sheet = 'Raw Data')
 kable(survey)
 survey$`Number of Survey`<-factor(survey$`Number of Survey`,levels=c(0,1,2,'[3,5]','6+'))
-ggplot(survey)+geom_col(aes(x=survey$`Number of Survey`,y=survey$Percentage,fill=survey$Respondents),alpha=0.7)
+ggplot(survey)+geom_col(aes(x=survey$`Number of Survey`,
+                            y=survey$Percentage,fill=survey$Respondents),alpha=0.7)
 
 ```
 
@@ -365,6 +366,8 @@ In this data set, we can use the recursive formula for NBD, which is defined as 
 Using the above formula, we can calculate the probability all the $x$ values, and the log-likelihood is defined as:
 
 $$ LL = \sum_{k=1}^{2} n_k log P(X=k) + \log n_{3-5} \sum_{k=3}^{5}P(X=k) + \log n_{6+} (1 - \sum_{k=0}^{5} P(X=k)$$
+
+For the Negative Binomial model, the parameters $r$ and $\alpha$ are optimized to be 0.391355703 and 0.2476297638 respectively. Notice that this is quite a poor fit, so we also tried the Poisson model, but the result looks to be even worse.
 
 ```{r NBDRecursive,echo=FALSE}
 NBD.recur<-function(data,par){
@@ -383,20 +386,25 @@ NBD.recur<-function(data,par){
   return(pmf);
 }
     
-lambda <-2.6366570197636
-r<-1.19116
-alpha<-0.38168
-best.fit.NBD<-
+lambda <-1.31368
+r<-0.391355703
+alpha<-0.247629763
+
+rz<-2.856950974
+alphaz<-1.03730662
+pz<-0.469844976
+
+N<-sum(survey$Respondents)
 NBD<-vector('numeric',5)
 NBD[1:3]<-dnbinom(0:2,r,alpha)
 NBD[4]<-sum(dnbinom(3:5,r,alpha))
 NBD[5]<-1-sum(NBD[1:4])
-survey[,'NBD']<-1865*NBD
+survey[,'NBD']<-N*NBD
 POI<-vector('numeric',5)
 POI[1:3]<-dpois(0:2,lambda)
 POI[4]<-sum(dpois(3:5,lambda))
 POI[5]<-1-sum(POI[1:4])
-survey[,'POI']<-1865*POI
+survey[,'POI']<-N*POI
 
 ggplot(survey)+geom_point(aes(x=survey$`Number of Survey`,y=survey$NBD,color='Negative Binomial'),alpha=0.7)+
 geom_point(aes(x=survey$`Number of Survey`,y=survey$Respondents,color='Actual'))
@@ -405,6 +413,11 @@ geom_point(aes(x=survey$`Number of Survey`,y=survey$Respondents,color='Actual'))
 ggplot(survey)+geom_point(aes(x=survey$`Number of Survey`,y=survey$POI,color='Poisson'))+
 geom_point(aes(x=survey$`Number of Survey`,y=survey$Respondents,color='Actual'))
 
+params_NBD<-c('r','alpha')
+paramsVal_NBD<-c(1.19116,0.38168)
+survey[,'chi2_NBD']<-(survey$NBD-survey$Respondents)^2/(survey$NBD)
+survey[,'chi2_POI']<-(survey$POI-survey$Respondents)^2/(survey$POI)
 
+kable(survey)
 
 ```
