@@ -1,0 +1,368 @@
+---
+title: "MKT 500T"
+author: "Sami Cheong"
+date: "`r format(Sys.time(), '%b %d %Y')`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+subtitle: Spring 2018 HW4
+geometry: left=3cm,right=3cm,top=2cm,bottom=2cm
+keep_tex: true
+---
+
+# Q1 Beta-Binomial model
+The beta-binomial model is defined as $$ p(X=x|n) = {n \choose x} \frac{B(\alpha + x, \beta + n -x)}{B(\alpha,\beta)},$$ which can be expressed as $$ p(X=x|n) = {n\choose x} \frac{\Gamma(\alpha+ x)\Gamma(\beta+n-x)}{\Gamma(\alpha + \beta + n)}\frac{\Gamma(\alpha + \beta)}{\Gamma(\alpha)\Gamma(\beta)}$$ 
+
+## Data overview:
+* Total population = 3035,  n (choices) = 0, 1,2,3,4,5 
+ 
+```{r,message=F,warning=F}
+library(knitr)
+library(ggplot2)
+library(dplyr)
+library(readxl)
+
+data<-read_excel('data/HW4 data.xlsx',sheet = 1)
+n<-sum(data$N_x)
+kable(data,align = 'c')
+
+```
+
+
+
+First, let's define the beta-binomial function and LL function:
+
+```{r,warning=F}
+LL.count<-function(count.data,pmf,par,debug=F){
+  
+  # par[1] = r, # par[2] = alpha
+  pmf.val<-pmf(count.data,par)
+  
+  LL.val<-sum(count.data$N_x*log10(pmf.val))
+  if(debug){
+    plot(count.data$x,pmf.val,type = 'l')
+    print(pmf)
+    print(log10(pmf.val))
+    print(LL.val)
+  }
+  
+  return(LL.val)
+}
+
+
+BB.pmf<-function(count.data,par){
+  N<-max(count.data$x)
+  N_count<-nrow(count.data)
+  #print(N)
+  alpha<-par[1]
+  beta<-par[2]
+  
+  pmf.val = vector("numeric",N_count)
+  for (i in 1:N_count){
+    x<-count.data$x[i]
+    #print(x)
+    comb<-choose(N,x)
+    pmf.val[i]<-(comb*beta(alpha+x,beta+N-x))/beta(alpha,beta)
+    #print(pmf.val)
+  }
+  return(pmf.val)
+
+
+  
+}
+## BB with spike at 0
+BBZ.pmf<-function(count.data,par){
+  N<-max(count.data$x)
+  N_count<-nrow(count.data)
+  alpha<-par[1]
+  beta<-par[2]
+  p0<-par[3]/(par[3]+1)
+  pmfz.val = vector("numeric",N_count)
+  pmf.val<-BB.pmf(count.data,c(par[1],par[2]))
+  pmfz.val[1]<-p0*pmf.val[1]
+  pmfz.val[2:N_count]<-(1-p0)*pmf.val[2:N_count]
+  return(pmfz.val)
+  
+}
+
+
+
+BB1.pmf<-function(count.data,par,N){
+  N<-max(count.data$x)
+  N_count<-nrow(count.data)
+  alpha<-par[1]
+  beta<-par[2]
+  p0<-par[3]/(par[3]+1)
+  pmfz.val = vector("numeric",N_count)
+  pmf.val<-BB.pmf(count.data,c(par[1],par[2]))
+  pmfz.val[1:(N_count-1)]<-(1-p0)*pmf.val[1:(N_count-1)]
+  pmfz.val[N_count]<-p0+(1-p0)*pmf.val[N_count]
+  return(pmfz.val)
+  
+}
+```
+## 1a Using MLE to solve for the optimal parameters, we have the following results:
+
+```{r,echo=F,warning=F,message=F}
+# get MLE for alpha and beta given n:
+BB.par.opt<-optim(par=c(1,1),fn=LL.count,pmf=BB.pmf,
+                    count.data =data, method="L-BFGS-B",
+                  control=list(fnscale=-1), lower=1e-10)
+
+
+BBZ.par.opt<-optim(par=c(1,1,0.1),fn=LL.count,pmf=BBZ.pmf,
+                    count.data =data, method="L-BFGS-B",
+                  control=list(fnscale=-1), lower=1e-10)
+
+BB1.par.opt<-optim(par=c(1,1,0.1),fn=LL.count,pmf=BB1.pmf,
+                    count.data =data, method="L-BFGS-B",
+                  control=list(fnscale=-1), lower=1e-10)
+
+
+
+
+
+
+stats_summary<-function(data,par_opt,method,pmf){
+
+exp_val<-paste0('exp_',method)
+chi2<-paste('chi_',method)
+ape<-paste('ape_',method)
+data[,method]<-pmf(data,par_opt$par)
+data[,exp_val]<-sum(data$N_x)*data[,method]
+data[,chi2]<-(data$N_x-data[,exp_val])^2/(data[,exp_val])
+data[,ape]<-abs(data$N_x-data[,exp_val])/(data$N_x)
+
+results<-list()
+par<-par_opt$par
+LL<-par_opt$value  
+chi2<-round(sum(data[,chi2]),3)
+MAPE<-sum(data[,ape])/nrow(data)
+
+df<-max(data$x)-length(par)
+
+p_val<-round(pchisq(chi2,df,lower.tail = F),4)
+
+results$stats<-data.frame(method,chi2,df,p_val,MAPE)
+alpha<-par[1]
+beta<-par[2]
+p0<-ifelse(length(par)<=2,NA,par[3]/(par[3]+1))
+LL<-LL
+results$par<-data.frame(alpha,beta,p0,LL)
+results$data<-data
+return(results)
+  
+}
+
+result_bb<-stats_summary(data,par = BB.par.opt,method = 'beta-binomial',pmf = BB.pmf)
+print(result_bb$stats)
+print(result_bb$par)
+kable(result_bb$data)
+
+
+result_bb0<-stats_summary(data,par = BBZ.par.opt,method = 'beta-binomial-0',pmf=BBZ.pmf)
+print(result_bb0$stats)
+print(result_bb0$par)
+kable(result_bb0$data)
+
+
+result_bb1<-stats_summary(data,par = BB1.par.opt,method = 'beta-binomial-1',pmf=BB1.pmf)
+print(result_bb1$stats)
+print(result_bb1$par)
+kable(result_bb1$data)
+
+```
+
+Notice that, the p-value from the chi-square statistics is close to 0 for all 3 models, but the beta-binomial model with spike at 0 is the worst (as indicated by MAPE), while moving the spike to x = 5 gives the lowest MAPE and relatively lower chi-squared value. In this case, we would consider that to be the best model, let's denote this as *BB1*.
+
+
+## 1b. Determine the implied penetration if $n = 10$ instead of 5.
+
+If the max category is actually 10, that means we need to adjust the formula a bit. Instead of using $n = 5,$ we should replace that to $n= 10$ and retrain the model:
+
+
+```{r,echo=FALSE}
+
+BBN.pmf<-function(count.data,par,N=10){
+  N<-N
+  N_count<-nrow(count.data)
+  #print(N)
+  alpha<-par[1]
+  beta<-par[2]
+  p0<-par[3]/(par[3]+1)
+  
+  pmf.val = vector("numeric",N_count)
+  for (i in 1:N_count){
+    x<-count.data$x[i]
+    #print(x)
+    comb<-choose(N,x)
+    pmf.val[i]<-(comb*beta(alpha+x,beta+N-x))/beta(alpha,beta)
+    #print(pmf.val)
+  }
+  pmf.val[1:(N_count-1)]<-(1-p0)*pmf.val[1:(N_count-1)]
+  pmf.val[N_count]<- p0+(1-p0)*pmf.val[N_count]
+  return(pmf.val)
+
+
+  
+}
+
+BBN.par.opt<-optim(par=c(1,1,1),fn=LL.count,pmf=BBN.pmf,
+                    count.data =data, method="L-BFGS-B",
+                  control=list(fnscale=-1), lower=1e-10)
+
+#print(BBN.par.opt)
+
+result_bb1N<-stats_summary(data,par = BBN.par.opt,
+                           method = 'beta-binomial-1N',
+                           pmf=BBN.pmf)
+print(result_bb1N$stats)
+print(result_bb1N$par)
+kable(result_bb1N$data)
+
+#ggplot(result_bb1N$data)+geom_point(aes(x=x,y=N_x,size=N_x,color='Actual'),alpha=0.7)+
+#  geom_point(aes(x=x,y=`exp_beta-binomial-1N`,size=N_x,color='BB1 (N=10)'),alpha=0.7)+
+#  ggtitle('Expected vs Actual using the beta-binomial model with spike @ 1 and N = 10')
+
+```
+
+
+To estimated expected penetration given n =10, we use the formula $P(X=0) =  \frac{B(\alpha,\beta+n)}{B(\alpha,\beta)}$. Plugging in the values trained from the given data ($\alpha = 0.2539, \beta = 5.0254$), the penetration is $1-P(x=0) = 0.252$   
+
+
+## 1c Using the 'means and zeros' estimation scheme to estiamte $\alpha$ and $\beta$ for the beta-binomial distribution:
+
+This means we need to solve for $\alpha^*$ and $\beta^*$ such that 
+
+$$ P(X=0|n) = \frac{B(\alpha^*,\beta^*+n)}{B(\alpha^*,\beta^*)}$$
+
+and $$ \mu = n \frac{\alpha^*}{\alpha^* + \beta^*},$$
+
+so we have a system of two non-linear equations 
+
+```{r,warning=F,message=F}
+require(nleqslv)
+BB_zm<-function(par,data){
+  n=10
+  p_x<-data$N_x/(sum(data$N_x))
+  p0<-p_x[1]
+  #print(p0)
+  mu <- sum(p_x*data$x)/n
+  #print(mu)
+  alpha <- par[1]
+  beta <-par[2]
+  
+  y<-numeric(2)
+  y[1]<-p0-(beta(alpha,beta+n)/beta(alpha,beta))
+  y[2]<-mu-(n*alpha/(alpha+beta))
+  
+  return(y)
+}
+# solve for alpha and r 
+par_BB_solv<-nleqslv(c(1,1),data=data,
+                 BB_zm,
+                 control = list(ftol = 1e-100, allowSingular =FALSE),
+                 method = 'Newton',jacobian = FALSE)
+par_BB_zm<-par_BB_solv$x
+par_zm<-list()
+par_zm$par<-c(par_BB_zm[1],par_BB_zm[2])
+par_zm$value<-NA
+
+result_bbZM<-BB.pmf(count.data = data,par=par_zm$par)
+print(par_zm)
+
+```
+
+It looks like there the solver provided a local minimum, applying those values to the dataset resulted in a really poor fit. 
+
+
+
+# Q2 Derive the posterior distribution for $\lambda$ and the conditional expectatino formula for an NBD model 
+
+
+The posterior distribution of $\lambda$ is 
+
+$$ g(\lambda|x) \propto \frac{g(x) p(x|\lambda)}{\int g(x) p(x|\lambda) d\lambda},$$
+where 
+
+$$ g(x)\sim \Gamma(r,\alpha)$$
+$$p(x|\lambda) \sim Poi(\lambda t)$$
+$$\int g(x) p(x|\lambda) d\lambda \sim NBD $$
+First, focus on the top part of the equation: 
+
+$$ g(x)p(x|\lambda) = \frac{\alpha^r \lambda^{r-1} e^{-\alpha \lambda}}{\Gamma(r)} \frac{\lambda^x e^{-\lambda t}}{x!}  = \frac{\alpha^r \lambda^{r+x-1} e^{-\lambda  (\alpha+t)}}{\Gamma(r)x!}$$
+
+
+The bottom part of the equation:
+
+$$ \int g(x) p(x|\lambda) d\lambda = \frac{\Gamma(r+x)}{x! \Gamma(r)} (\frac{\alpha}{\alpha+t})^r (\frac{1}{\alpha +t})^\lambda$$
+
+Putting the top and bottom together:
+
+$$ g(\lambda|x) = \frac{\lambda^{r+x-1} e^{-\lambda(\alpha+t)} (\alpha+t)^{r+x}}{\Gamma(r+x)}  \sim \Gamma(r+x,\alpha +t)$$ 
+
+Conditional Expectation for NBD $$E(X) = \sum x_i p(x|t=t^*) = \frac{r+x}{\alpha+t^*}$$
+
+# Q3 Revisiting the Billboard example
+
+Given $\alpha = 0.218$ and $r = 0.969,$  and data from two customers, we can estimate the Bayesian mean $\frac{r+x}{\alpha+t}$ using the cumulative viewing frequency. Notice that for non-unit time NBD, the global mean is $\frac{rt}{\mu}$
+
+```{r}
+bayes.data<-read_excel('data/Bayes_example.xlsx')
+bayes.data[,'Freq']<-bayes.data$Johari+bayes.data$Fangyuan
+alpha = 0.218
+r=0.969
+
+kable(bayes.data)
+bayes.data[,'bayes_est']<- (r+bayes.data$Freq)/(alpha+bayes.data$t)
+bayes.data[,'global_bayes_est']<- (r*bayes.data$t)/(alpha)
+
+kable(bayes.data)
+
+print(r/alpha)
+
+```
+
+Except for $t=1,$ the Bayesian estimates given by the data are quite different from those given by the global mean. This points to the importance of getting information from the data to provide an updated Bayesian estimate.
+
+## Q4. Consider a zero-inflated NBD model with parameters $r,\alpha$ and $\pi,$ derive the probability that someone who made zero purchase is part of the 'spike at zero' group.
+
+For this question, let's introduce a Bernoulli variable $Z,$ where $p(Z=1) = \pi$ and $p(Z=0) = 1-\pi.$ We are trying to find the probability $p(Z=1|X=0)$
+
+Using Baye's theorem, we know that:
+* $$ p(Z=1|X=0) = \frac{p(X=0|Z=1) p(Z=1)}{p(X=0)}$$
+
+* Assuming $X \sim NBD(r,\alpha),$ we can derive p(X=0) to be $(\frac{\alpha}{\alpha+t})^r.$ 
+* $p(X=0|Z=1)$ is the probability that someone made a zero purchase given they're from the spike at 0 group, as it was defined previously, that probability is $$p(X=0|Z=1) = \pi + (1-\pi) p(X=0)$$
+
+Therefore, putting it together we have a non-standard density: 
+
+
+$$ 
+p(Z=1|X=0)= \frac{(\pi + (1-\pi) (\frac{\alpha}{\alpha+t})^r)\pi} {(\frac{\alpha}{\alpha+t})^r}
+$$ 
+
+Plugging in the parameter values we estimated from the billboard example, it shows that there is about a 2.2 % chance that someone who made 0 purchase (at time 1) is indeed from the 'zero' group.
+
+```{r}
+r=1.031391516
+alpha=0.226778383
+pi=0.020231372
+px0<-(alpha/(alpha+1))^r
+
+pz1<-((pi +(1-pi)*px0)*pi)/px0
+print(pz1)
+```
+
+
+Q5. Questions I would like more clarity on:
+
+1. Can we see more examples of non-unit time models and how to handle estimates that are conditioned on a previous time?
+
+2. For those that are interested in using R for the class, can we go over some of the solvers for different types of optimization problems and non-linear equations?
+
+3. I didn't quite understand the concept of 'shrinkage' for Bayesian estimates, are there a more general source, or mathematical representation we can look into?
+
+
+

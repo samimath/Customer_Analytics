@@ -77,7 +77,25 @@ getLL<-function(count.data,pmf,par,debug=F){
   return(LL.val)
 }
 
+BB.pmf<-function(count.data,par){
+  
+  N<-par[1]
+  alpha<-par[2]
+  beta<-par[3]
+  
+  pmf.val = vector("numeric",N)
+  for (i in 1:N){
+    x<-count.data$x[i]
+    print(x)
+    comb<-choose(N,x)
+    pmf.val[i]<-(comb*beta(alpha+x,beta+N-x))/beta(alpha,beta)
+    print(pmf.val)
+  }
+  return(pmf.val)
 
+
+  
+}
 
 ## HW2:
 
